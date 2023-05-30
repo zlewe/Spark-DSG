@@ -7,9 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_compile_options(-Wall -Wextra)
 
-option(SPARK_DSG_BUILD_TESTS "Build tests" ON)
+option(SPARK_DSG_BUILD_TESTS "Build tests" OFF)
 option(SPARK_DSG_INSTALL "Install C++ package" ON)
-option(SPARK_DSG_INSTALL_TESTS "Install tests to catkin location" ON)
+option(SPARK_DSG_INSTALL_TESTS "Install tests to catkin location" OFF)
 option(SPARK_DSG_BUILD_PYTHON "Build python bindings" OFF)
 option(BUILD_SHARED_LIBS "Build shared libs" ON)
 
@@ -52,6 +52,7 @@ add_library(
   src/scene_graph_utilities.cpp
   src/serialization_helpers.cpp
   src/scene_graph_logger.cpp
+  src/floor_graph.cpp
 )
 set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE 1)
 target_include_directories(

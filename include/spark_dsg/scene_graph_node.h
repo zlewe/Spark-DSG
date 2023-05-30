@@ -74,6 +74,7 @@ class SceneGraphNode {
   using Ptr = std::unique_ptr<SceneGraphNode>;
   friend class DynamicSceneGraphLayer;
   friend class DynamicSceneGraph;
+  friend class FloorGraph;
   friend class SceneGraphLayer;
 
   /**

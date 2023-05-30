@@ -35,17 +35,28 @@
 #pragma once
 #include "spark_dsg/bounding_box.h"
 #include "spark_dsg/dynamic_scene_graph.h"
+#include "spark_dsg/floor_graph.h"
 
 namespace spark_dsg {
 
 using SgNodeCallback = std::function<void(const DynamicSceneGraph&, const NodeId)>;
+using FgNodeCallback = std::function<void(const FloorGraph&, const NodeId)>;
 
 void getAncestorsOfLayer(const DynamicSceneGraph& graph,
                          NodeId parent,
                          LayerKey child_layer,
                          const SgNodeCallback& callback);
 
+void getAncestorsOfLayer(const FloorGraph& graph,
+                         NodeId parent,
+                         LayerKey child_layer,
+                         const FgNodeCallback& callback);
+
 BoundingBox computeAncestorBoundingBox(const DynamicSceneGraph& graph,
+                                       NodeId parent,
+                                       LayerId child_layer = DsgLayers::PLACES);
+
+BoundingBox computeAncestorBoundingBox(const FloorGraph& graph,
                                        NodeId parent,
                                        LayerId child_layer = DsgLayers::PLACES);
 

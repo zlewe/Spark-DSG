@@ -67,6 +67,7 @@ class SceneGraphLayer : public BaseLayer {
   using Edges = EdgeContainer::Edges;
 
   friend class DynamicSceneGraph;
+  friend class FloorGraph;
   friend class SceneGraphLogger;
 
   /**

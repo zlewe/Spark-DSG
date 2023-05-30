@@ -113,6 +113,8 @@ std::string DsgLayers::LayerIdToString(LayerId id) {
       return "OBJECTS";  // we default to the static labels
     case PLACES:
       return "PLACES";
+    case FLOORPLAN:
+      return "FLOORPLAN";
     case ROOMS:
       return "ROOMS";
     case BUILDINGS:
@@ -134,6 +136,8 @@ LayerId DsgLayers::StringToLayerId(const std::string& id_str) {
     return DsgLayers::OBJECTS;
   } else if (to_check == "PLACES" || to_check == "STRUCTURE") {
     return DsgLayers::PLACES;
+  } else if (to_check == "FLOORPLAN") {
+    return DsgLayers::FLOORPLAN;
   } else if (to_check == "ROOMS") {
     return DsgLayers::ROOMS;
   } else if (to_check == "BUILDINGS") {

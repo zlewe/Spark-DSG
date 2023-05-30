@@ -51,6 +51,7 @@ class BaseLayer {
   using EdgeRef = std::reference_wrapper<const SceneGraphEdge>;
 
   friend class DynamicSceneGraph;
+  friend class FloorGraph;
 
   virtual ~BaseLayer() = default;
 
