@@ -110,20 +110,17 @@ void writeWord(std::vector<uint8_t>& buffer, const T& value) {
 template <typename T,
           typename std::enable_if<NeedEndianSwap() && std::is_integral<T>::value,
                                   bool>::type = true>
-void readWord(const std::vector<uint8_t>& buffer, size_t pos, T& value) {
+void readWord(const T* buffer, T& value) {
   static_assert(sizeof(T) > 1, "only required for 2 or more bytes");
-  assert(buffer.size() < pos + sizeof(value));
-  const T* placeholder = reinterpret_cast<const T*>(buffer.data() + pos);
-  SwapEndian::swap(*placeholder, value);
+  SwapEndian::swap(*buffer, value);
 }
 
 template <typename T,
           typename std::enable_if<!NeedEndianSwap() && std::is_integral<T>::value,
                                   bool>::type = true>
-void readWord(const std::vector<uint8_t>& buffer, size_t pos, T& value) {
+void readWord(const T* buffer, T& value) {
   static_assert(sizeof(T) > 1, "only required for 2 or more bytes");
-  assert(buffer.size() < pos + sizeof(value));
-  value = *reinterpret_cast<const T*>(buffer.data() + pos);
+  value = *buffer;
 }
 
 // subset of the msgpack spec: https://github.com/msgpack/msgpack/blob/master/spec.md
@@ -230,7 +227,7 @@ void write_binary(Serializer& s, const std::vector<T>& values) {
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, bool& value) {
-  PackType ref_type = static_cast<PackType>(s.ref->at(s.pos));
+  PackType ref_type = s.getCurrType();
   switch (ref_type) {
     case PackType::FALSE:
       value = false;
@@ -261,63 +258,63 @@ size_t read_binary(const Deserializer& s, int8_t& value) {
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, uint16_t& value) {
   s.checkType(PackType::UINT16);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<uint16_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, int16_t& value) {
   s.checkType(PackType::INT16);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<int16_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, uint32_t& value) {
   s.checkType(PackType::UINT32);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<uint32_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, int32_t& value) {
   s.checkType(PackType::INT32);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<int32_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, uint64_t& value) {
   s.checkType(PackType::UINT64);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<uint64_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, int64_t& value) {
   s.checkType(PackType::INT64);
-  readWord(*s.ref, s.pos, value);
+  readWord(s.template getReadPtr<int64_t>(), value);
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, float& value) {
   s.checkType(PackType::FLOAT32);
-  readWord(*s.ref, s.pos, reinterpret_cast<uint32_t&>(value));
+  readWord(s.template getReadPtr<uint32_t>(), reinterpret_cast<uint32_t&>(value));
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, double& value) {
   s.checkType(PackType::FLOAT64);
-  readWord(*s.ref, s.pos, reinterpret_cast<uint64_t&>(value));
+  readWord(s.template getReadPtr<uint64_t>(), reinterpret_cast<uint64_t&>(value));
   return sizeof(value);
 }
 
 template <typename Deserializer>
 size_t read_binary(const Deserializer& s, std::string& value) {
   const size_t length = s.readFixedArrayLength();
-  value = std::string(s.template getReadPtr<char>(), length);
+  value = std::string(s.template getReadPtr<char>(length), length);
   return length;
 }
 
@@ -388,13 +385,22 @@ void write_binary(Serializer& s, const Quaternion<Scalar>& q) {
 
 template <typename Deserializer, typename Derived>
 size_t read_binary(const Deserializer& s, MatrixBase<Derived>& matrix) {
-  s.readFixedArrayLength();
+  const size_t length = s.readFixedArrayLength();
+  if (length < 2u) {
+    throw std::out_of_range("array dimensions not present");
+  }
+
   Index rows, cols;
   s.read(rows);
   s.read(cols);
+  if (rows * cols + 2 != static_cast<int64_t>(length)) {
+    throw std::out_of_range("array dimensions do not match length");
+  }
+
   matrix.derived().resize(rows, cols);
-  for (Index r = 0; r < rows; ++r) {
-    for (Index c = 0; c < cols; ++c) {
+  // TODO(nathan) warn about row/col mismatch
+  for (Index r = 0; r < matrix.rows(); ++r) {
+    for (Index c = 0; c < matrix.cols(); ++c) {
       s.read(matrix(r, c));
     }
   }

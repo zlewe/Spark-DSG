@@ -190,6 +190,11 @@ class DynamicSceneGraph {
                       bool allow_invalid_mesh = false);
 
   /**
+   * @brief Initialize an empty mesh
+   */
+  void initMesh();
+
+  /**
    * @brief Set the attributes of an existing node
    * @param node Node ID to set the attributes for
    * @param attrs New attributes for the node
@@ -255,6 +260,12 @@ class DynamicSceneGraph {
    * @returns Returns true if the mesh exists and is valid
    */
   bool hasMesh() const;
+
+  /**
+   * @brief Check whether the scene graph contains a mesh with actual data
+   * @returns Returns true if the mesh has vertices and faces
+   */
+  bool isMeshEmpty() const;
 
   /**
    * @brief Get a layer if the layer exists
@@ -366,6 +377,12 @@ class DynamicSceneGraph {
   size_t numNodes(bool include_mesh = true) const;
 
   /**
+   * @brief Get the number of static nodes in the graph
+   * @return The number of static nodes in the graph
+   */
+  size_t numStaticNodes() const;
+
+  /**
    * @brief Get the number of dynamic nodes in the graph
    * @return The number of dynamic nodes in the graph
    */
@@ -376,6 +393,18 @@ class DynamicSceneGraph {
    * @return number of edges in the graph
    */
   size_t numEdges(bool include_mesh = true) const;
+
+  /**
+   * @brief Get number of static edges in the graph
+   * @return number of static edges in the graph
+   */
+  size_t numStaticEdges() const;
+
+  /**
+   * @brief Get number of dynamic edges in the graph
+   * @return number of dynamic edges in the graph
+   */
+  size_t numDynamicEdges() const;
 
   /**
    * @brief Get whether or not the scene graph is empty
@@ -483,10 +512,20 @@ class DynamicSceneGraph {
 
   static Ptr deserialize(const std::string& contents);
 
+  /** @brief track which edges get used during a serialization update
+   */
+  void markEdgesAsStale();
+
+  /** @brief remove edges that do not appear in serialization update
+   */
+  void removeAllStaleEdges();
+
   /**
    * @brief mesh getter
    */
   pcl::PolygonMesh getMesh() const;
+
+  DynamicSceneGraph::Ptr clone() const;
 
   //! mesh layer id
   const LayerId mesh_layer_id;
@@ -495,6 +534,8 @@ class DynamicSceneGraph {
   const LayerIds layer_ids;
 
  protected:
+  void removeStaleEdges(EdgeContainer& edges);
+
   void visitLayers(const LayerVisitor& cb);
 
   bool hasEdge(NodeId source,
@@ -553,6 +594,11 @@ class DynamicSceneGraph {
    * @brief constant iterator around the layers
    */
   inline const Layers& layers() const { return layers_; };
+
+  /**
+   * @brief constant iterator over mapping between nodes and layers
+   */
+  inline const std::map<NodeId, LayerKey>& node_lookup() const { return node_lookup_; }
 
   /**
    * @brief constant iterator around the inter-layer edges

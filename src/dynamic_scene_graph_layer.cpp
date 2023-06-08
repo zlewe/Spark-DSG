@@ -125,6 +125,7 @@ bool DynamicSceneGraphLayer::emplaceNodeAtIndex(std::chrono::nanoseconds stamp,
   }
 
   const NodeId new_id = prefix.makeId(index);
+  times_.insert(stamp.count());
   nodes_[index] = std::make_unique<Node>(new_id, id, std::move(attrs), stamp);
   node_status_[index] = NodeStatus::NEW;
   return true;
@@ -267,6 +268,7 @@ bool DynamicSceneGraphLayer::removeNode(NodeId node) {
   // TODO(nathan) this is slightly brittle, maybe consider std::map instead
   node_status_[index] = NodeStatus::DELETED;
   times_.erase(nodes_.at(index)->timestamp.count());
+  nodes_[index].reset();
   return true;
 }
 

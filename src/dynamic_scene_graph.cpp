@@ -269,6 +269,14 @@ bool DynamicSceneGraph::insertMeshEdge(NodeId source,
   return true;
 }
 
+void DynamicSceneGraph::initMesh() {
+  DynamicSceneGraph::MeshVertices fake_vertices;
+  pcl::PolygonMesh fake_mesh;
+  pcl::toPCLPointCloud2(fake_vertices, fake_mesh.cloud);
+
+  setMeshDirectly(fake_mesh);
+}
+
 bool DynamicSceneGraph::setNodeAttributes(NodeId node, NodeAttributes::Ptr&& attrs) {
   auto iter = node_lookup_.find(node);
   if (iter == node_lookup_.end()) {
@@ -333,9 +341,16 @@ NodeStatus DynamicSceneGraph::checkNode(NodeId node_id) const {
   return layerFromKey(iter->second).checkNode(node_id);
 }
 
-
 bool DynamicSceneGraph::hasMesh() const {
   return mesh_vertices_ != nullptr && mesh_faces_ != nullptr;
+}
+
+bool DynamicSceneGraph::isMeshEmpty() const {
+  if (!hasMesh()) {
+    return true;
+  }
+
+  return mesh_vertices_->empty() && mesh_faces_->empty();
 }
 
 const SceneGraphLayer& DynamicSceneGraph::getLayer(LayerId layer) const {
@@ -651,12 +666,7 @@ size_t DynamicSceneGraph::numLayers() const {
 }
 
 size_t DynamicSceneGraph::numNodes(bool include_mesh) const {
-  size_t total_nodes = 0u;
-  for (const auto& id_layer_pair : layers_) {
-    total_nodes += id_layer_pair.second->numNodes();
-  }
-
-  return total_nodes + numDynamicNodes() +
+  return numStaticNodes() + numDynamicNodes() +
          ((mesh_vertices_ == nullptr || !include_mesh) ? 0 : mesh_vertices_->size());
 }
 
@@ -671,11 +681,30 @@ size_t DynamicSceneGraph::numDynamicNodes() const {
   return total_nodes;
 }
 
+size_t DynamicSceneGraph::numStaticNodes() const {
+  size_t total_nodes = 0u;
+  for (const auto& id_layer_pair : layers_) {
+    total_nodes += id_layer_pair.second->numNodes();
+  }
+
+  return total_nodes;
+}
+
 size_t DynamicSceneGraph::numEdges(bool include_mesh) const {
-  size_t total_edges = interlayer_edges_.size() + dynamic_interlayer_edges_.size();
+  return numStaticEdges() + numDynamicEdges() + (include_mesh ? mesh_edges_.size() : 0);
+}
+
+size_t DynamicSceneGraph::numStaticEdges() const {
+  size_t total_edges = interlayer_edges_.size();
   for (const auto& id_layer_pair : layers_) {
     total_edges += id_layer_pair.second->numEdges();
   }
+
+  return total_edges;
+}
+
+size_t DynamicSceneGraph::numDynamicEdges() const {
+  size_t total_edges = dynamic_interlayer_edges_.size();
 
   for (const auto& id_group_pair : dynamic_layers_) {
     for (const auto& prefix_layer_pair : id_group_pair.second) {
@@ -683,7 +712,7 @@ size_t DynamicSceneGraph::numEdges(bool include_mesh) const {
     }
   }
 
-  return total_edges + (include_mesh ? mesh_edges_.size() : 0);
+  return total_edges;
 }
 
 bool DynamicSceneGraph::updateFromLayer(SceneGraphLayer& other_layer,
@@ -1040,9 +1069,108 @@ pcl::PolygonMesh DynamicSceneGraph::getMesh() const {
   return mesh;
 };
 
+void DynamicSceneGraph::markEdgesAsStale() {
+  for (auto& id_layer_pair : layers_) {
+    id_layer_pair.second->edges_.setStale();
+  }
+  for (auto& layer_map : dynamic_layers_) {
+    for (auto& id_layer_pair : layer_map.second) {
+      id_layer_pair.second->edges_.setStale();
+    }
+  }
+
+  dynamic_interlayer_edges_.setStale();
+  interlayer_edges_.setStale();
+}
+
+void DynamicSceneGraph::removeStaleEdges(EdgeContainer& edges) {
+  for (const auto& edge_key_pair : edges.stale_edges) {
+    if (edge_key_pair.second) {
+      removeEdge(edge_key_pair.first.k1, edge_key_pair.first.k2);
+    }
+  }
+}
+
+void DynamicSceneGraph::removeAllStaleEdges() {
+  for (auto& id_layer_pair : layers_) {
+    removeStaleEdges(id_layer_pair.second->edges_);
+  }
+  for (auto& layer_map : dynamic_layers_) {
+    for (auto& id_layer_pair : layer_map.second) {
+      removeStaleEdges(id_layer_pair.second->edges_);
+    }
+  }
+
+  removeStaleEdges(interlayer_edges_);
+  removeStaleEdges(dynamic_interlayer_edges_);
+}
+
 DynamicSceneGraph::LayerIds getDefaultLayerIds() {
   return {
       DsgLayers::OBJECTS, DsgLayers::PLACES, DsgLayers::ROOMS, DsgLayers::BUILDINGS};
+}
+
+DynamicSceneGraph::Ptr DynamicSceneGraph::clone() const {
+  auto to_return = std::make_shared<DynamicSceneGraph>(layer_ids, mesh_layer_id);
+  for (const auto id_layer_pair : node_lookup_) {
+    auto node = getNodePtr(id_layer_pair.first, id_layer_pair.second);
+    if (id_layer_pair.second.dynamic) {
+      auto node_dyn = dynamic_cast<DynamicSceneGraphNode*>(node);
+      if (!node_dyn) {
+        // TODO(nathan) fix exception messages
+        std::stringstream ss;
+        ss << "node " << NodeSymbol(node->id).getLabel() << " is not dynamic!";
+        throw std::runtime_error(ss.str());
+      }
+
+      to_return->emplacePrevDynamicNode(node_dyn->layer,
+                                        node_dyn->id,
+                                        node_dyn->timestamp,
+                                        node_dyn->attributes_->clone());
+    } else {
+      to_return->emplaceNode(node->layer, node->id, node->attributes_->clone());
+    }
+  }
+
+  for (const auto& id_layer_pair : layers_) {
+    for (const auto& id_edge_pair : id_layer_pair.second->edges()) {
+      const auto& edge = id_edge_pair.second;
+      to_return->insertEdge(edge.source, edge.target, edge.info->clone());
+    }
+  }
+
+  for (const auto& id_layer_group : dynamic_layers_) {
+    for (const auto& prefix_layer_pair : id_layer_group.second) {
+      for (const auto& id_edge_pair : prefix_layer_pair.second->edges()) {
+        const auto& edge = id_edge_pair.second;
+        to_return->insertEdge(edge.source, edge.target, edge.info->clone());
+      }
+    }
+  }
+
+  for (const auto& id_edge_pair : interlayer_edges()) {
+    const auto& edge = id_edge_pair.second;
+    to_return->insertEdge(edge.source, edge.target, edge.info->clone());
+  }
+
+  for (const auto& id_edge_pair : dynamic_interlayer_edges()) {
+    const auto& edge = id_edge_pair.second;
+    to_return->insertEdge(edge.source, edge.target, edge.info->clone());
+  }
+
+  if (mesh_vertices_) {
+    to_return->mesh_vertices_.reset(new MeshVertices(*mesh_vertices_));
+  }
+  if (mesh_faces_) {
+    to_return->mesh_faces_ = std::make_shared<MeshFaces>(*mesh_faces_);
+  }
+
+  for (const auto& id_edge_pair : mesh_edges_) {
+    const auto& edge = id_edge_pair.second;
+    to_return->insertMeshEdge(edge.source_node, edge.mesh_vertex, true);
+  }
+
+  return to_return;
 }
 
 }  // namespace spark_dsg

@@ -29,6 +29,7 @@ add_executable(
   utest_bounding_box.cpp
   utest_dynamic_scene_graph.cpp
   utest_dynamic_scene_graph_layer.cpp
+  utest_edge_container.cpp
   utest_graph_utilities_layer.cpp
   utest_binary_serialization.cpp
   utest_json_serialization.cpp
@@ -42,6 +43,13 @@ target_include_directories(utest_${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_
 target_link_libraries(
   utest_${PROJECT_NAME} ${PROJECT_NAME} gtest nlohmann_json::nlohmann_json
 )
+
+if(SPARK_DSG_BUILD_ZMQ AND zmq_FOUND)
+  target_sources(
+    utest_${PROJECT_NAME}
+    PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/utest_zmq_interface.cpp>"
+  )
+endif()
 
 if(${SPARK_DSG_INSTALL_TESTS})
   # note that ros uses libdir to handle finding executables by package, but this isn't

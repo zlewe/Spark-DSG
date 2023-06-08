@@ -33,6 +33,7 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #include "scene_graph_iterators.h"
+#include "zmq_bindings.h"
 
 #include <spark_dsg/dynamic_scene_graph.h>
 #include <spark_dsg/node_attributes.h>
@@ -51,6 +52,8 @@ namespace py = pybind11;
 using namespace py::literals;
 
 using namespace spark_dsg;
+
+PYBIND11_MAKE_OPAQUE(std::map<size_t, MeshEdge>);
 
 template <typename Scalar>
 struct Quaternion {
@@ -85,6 +88,8 @@ std::ostream& operator<<(std::ostream& out, const Quaternion<Scalar>& q) {
 PYBIND11_MODULE(_dsg_bindings, module) {
   py::options options;
   // options.disable_function_signatures();
+
+  add_zmq_bindings(module);
 
   py::enum_<BoundingBox::Type>(module, "BoundingBoxType")
       .value("INVALID", BoundingBox::Type::INVALID)
@@ -139,6 +144,12 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       .def_readwrite("max", &BoundingBox::max)
       .def_readwrite("world_P_center", &BoundingBox::world_P_center)
       .def_readwrite("world_R_center", &BoundingBox::world_R_center)
+      .def("is_inside",
+           static_cast<bool (BoundingBox::*)(const Eigen::Vector3d&) const>(
+               &BoundingBox::isInside))
+      .def("is_inside",
+           static_cast<bool (BoundingBox::*)(const Eigen::Vector3f&) const>(
+               &BoundingBox::isInside))
       .def("__repr__", [](const BoundingBox& box) {
         std::stringstream ss;
         ss << box;
@@ -260,11 +271,12 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       });
 
   // TODO(nathan) iterator over nodes and edges
-  py::class_<SceneGraphLayer>(module, "SceneGraphLayer")
+  py::class_<SceneGraphLayer, std::shared_ptr<SceneGraphLayer>>(module,
+                                                                "SceneGraphLayer")
       .def(py::init<LayerId>())
       .def("insert_edge",
            [](SceneGraphLayer& layer, NodeId source, NodeId target) {
-             layer.insertEdge(source, target);
+             return layer.insertEdge(source, target);
            })
       .def("insert_edge",
            [](SceneGraphLayer& layer,
@@ -273,7 +285,7 @@ PYBIND11_MODULE(_dsg_bindings, module) {
               const EdgeAttributes& info) {
              EdgeAttributes::Ptr edge_info(new EdgeAttributes());
              *edge_info = info;
-             layer.insertEdge(source, target, std::move(edge_info));
+             return layer.insertEdge(source, target, std::move(edge_info));
            })
       .def("has_node", &SceneGraphLayer::hasNode)
       .def("has_edge", &SceneGraphLayer::hasEdge)
@@ -286,9 +298,14 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       .def_readonly("id", &SceneGraphLayer::id);
 
   py::class_<LayerView>(module, "LayerView")
-      .def_readonly("id", &LayerView::id)
+      .def("has_node", &LayerView::hasNode)
+      .def("has_edge", &LayerView::hasEdge)
+      .def("get_node", &LayerView::getNode)
+      .def("get_edge", &LayerView::getEdge)
       .def("num_nodes", &LayerView::numNodes)
       .def("num_edges", &LayerView::numEdges)
+      .def("get_position", &LayerView::getPosition)
+      .def_readonly("id", &LayerView::id)
       .def_property("nodes",
                     [](const LayerView& view) {
                       return py::make_iterator(view.nodes(), IterSentinel());
@@ -319,6 +336,11 @@ PYBIND11_MODULE(_dsg_bindings, module) {
                     },
                     nullptr,
                     py::return_value_policy::reference_internal);
+
+  py::class_<MeshEdge>(module, "MeshEdge")
+      .def_property_readonly(
+          "node_id", [](const MeshEdge& edge) { return NodeSymbol(edge.source_node); })
+      .def_readonly("mesh_vertex", &MeshEdge::mesh_vertex);
 
 #define MAKE_SPECIALIZED_NODE_ADD(AttributeClass)                   \
   def("add_node",                                                   \
@@ -353,6 +375,7 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       .def(py::init<>())
       .def(py::init<const DynamicSceneGraph::LayerIds&>())
       .def("clear", &DynamicSceneGraph::clear)
+      .def("create_dynamic_layer", &DynamicSceneGraph::createDynamicLayer)
       .MAKE_SPECIALIZED_NODE_ADD(ObjectNodeAttributes)
       .MAKE_SPECIALIZED_NODE_ADD(RoomNodeAttributes)
       .MAKE_SPECIALIZED_NODE_ADD(PlaceNodeAttributes)
@@ -362,7 +385,7 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       .MAKE_SPECIALIZED_DYNAMIC_NODE_ADD(AgentNodeAttributes)
       .def("insert_edge",
            [](DynamicSceneGraph& graph, NodeId source, NodeId target) {
-             graph.insertEdge(source, target);
+             return graph.insertEdge(source, target);
            })
       .def("insert_edge",
            [](DynamicSceneGraph& graph,
@@ -371,7 +394,7 @@ PYBIND11_MODULE(_dsg_bindings, module) {
               const EdgeAttributes& info) {
              EdgeAttributes::Ptr edge_info(new EdgeAttributes());
              *edge_info = info;
-             graph.insertEdge(source, target, std::move(edge_info));
+             return graph.insertEdge(source, target, std::move(edge_info));
            })
       .def("has_layer",
            static_cast<bool (DynamicSceneGraph::*)(LayerId) const>(
@@ -407,10 +430,13 @@ PYBIND11_MODULE(_dsg_bindings, module) {
       .def("num_layers", &DynamicSceneGraph::numLayers)
       .def("num_dynamic_layers_of_type", &DynamicSceneGraph::numDynamicLayersOfType)
       .def("num_dynamic_layers", &DynamicSceneGraph::numDynamicLayers)
-      .def("num_nodes", &DynamicSceneGraph::numNodes)
+      .def("num_nodes", &DynamicSceneGraph::numNodes, "include_mesh"_a = false)
+      .def("num_static_nodes", &DynamicSceneGraph::numStaticNodes)
       .def("num_dynamic_nodes", &DynamicSceneGraph::numDynamicNodes)
       .def("empty", &DynamicSceneGraph::empty)
-      .def("num_edges", &DynamicSceneGraph::numEdges)
+      .def("num_edges", &DynamicSceneGraph::numEdges, "include_mesh"_a = false)
+      .def("num_static_edges", &DynamicSceneGraph::numStaticEdges)
+      .def("num_dynamic_edges", &DynamicSceneGraph::numDynamicEdges)
       .def("get_position", &DynamicSceneGraph::getPosition)
       .def("save",
            [](const DynamicSceneGraph& graph,
@@ -454,13 +480,105 @@ PYBIND11_MODULE(_dsg_bindings, module) {
                     py::return_value_policy::reference_internal)
       .def_property("dynamic_interlayer_edges",
                     [](const DynamicSceneGraph& graph) {
-                      return py::make_iterator(EdgeIter(graph.dynamic_interlayer_edges()),
-                                               IterSentinel());
+                      return py::make_iterator(
+                          EdgeIter(graph.dynamic_interlayer_edges()), IterSentinel());
                     },
                     nullptr,
-                    py::return_value_policy::reference_internal);
+                    py::return_value_policy::reference_internal)
+      .def("clone", &DynamicSceneGraph::clone)
+      .def("__deepcopy__",
+           [](const DynamicSceneGraph& G, py::object) { return G.clone(); })
+      .def("get_mesh_vertices",
+           [](const DynamicSceneGraph& G) {
+             auto vertices = G.getMeshVertices();
+             if (!vertices) {
+               return Eigen::MatrixXd();
+             }
+
+             Eigen::MatrixXd to_return(6, vertices->size());
+             for (size_t i = 0; i < vertices->size(); ++i) {
+               const auto& point = vertices->at(i);
+               to_return(0, i) = point.x;
+               to_return(1, i) = point.y;
+               to_return(2, i) = point.z;
+               to_return(3, i) = point.r / 255.0;
+               to_return(4, i) = point.g / 255.0;
+               to_return(5, i) = point.b / 255.0;
+             }
+             return to_return;
+           })
+      .def("get_mesh_faces",
+           [](const DynamicSceneGraph& G) {
+             auto faces = G.getMeshFaces();
+             if (!faces) {
+               return Eigen::MatrixXi();
+             }
+
+             Eigen::MatrixXi to_return(3, faces->size());
+             for (size_t i = 0; i < faces->size(); ++i) {
+               const auto& face = faces->at(i);
+               to_return(0, i) = face.vertices.at(0);
+               to_return(1, i) = face.vertices.at(1);
+               to_return(2, i) = face.vertices.at(2);
+             }
+             return to_return;
+           })
+      .def("set_mesh_vertices",
+           [](DynamicSceneGraph& G, const Eigen::MatrixXd& points) {
+             if (points.rows() != 6) {
+               std::stringstream ss;
+               ss << "point rows do not match expected: " << points.rows() << " != 6";
+               throw std::invalid_argument(ss.str());
+             }
+
+             DynamicSceneGraph::MeshVertices::Ptr vertices(
+                 new DynamicSceneGraph::MeshVertices());
+             for (int i = 0; i < points.cols(); ++i) {
+               pcl::PointXYZRGBA point;
+               point.x = points(0, i);
+               point.y = points(1, i);
+               point.z = points(2, i);
+               point.r = static_cast<uint8_t>(points(3, i) * 255);
+               point.g = static_cast<uint8_t>(points(4, i) * 255);
+               point.b = static_cast<uint8_t>(points(5, i) * 255);
+               point.a = 255;
+               vertices->push_back(point);
+             }
+             G.setMesh(vertices, G.getMeshFaces(), false);
+           })
+      .def("set_mesh_faces",
+           [](DynamicSceneGraph& G, const Eigen::MatrixXd& indices) {
+             if (indices.rows() != 3) {
+               std::stringstream ss;
+               ss << "index rows do not match expected: " << indices.rows() << " != 3";
+               throw std::invalid_argument(ss.str());
+             }
+
+             std::shared_ptr<DynamicSceneGraph::MeshFaces> faces(
+                 new DynamicSceneGraph::MeshFaces());
+             for (int i = 0; i < indices.cols(); ++i) {
+               pcl::Vertices face;
+               face.vertices.push_back(indices(0, i));
+               face.vertices.push_back(indices(1, i));
+               face.vertices.push_back(indices(2, i));
+               faces->push_back(face);
+             }
+             G.setMesh(G.getMeshVertices(), faces, false);
+           })
+      .def("insert_mesh_edge",
+           &DynamicSceneGraph::insertMeshEdge,
+           "source"_a,
+           "mesh_vertex"_a,
+           "allow_invalid_mesh"_a = true)
+      .def("remove_mesh_edge", &DynamicSceneGraph::removeMeshEdge)
+      .def("clear_mesh_edges", &DynamicSceneGraph::clearMeshEdges)
+      .def("invalidate_mesh_vertex", &DynamicSceneGraph::invalidateMeshVertex)
+      .def("get_mesh_connections", &DynamicSceneGraph::getMeshConnectionIndices)
+      .def_property_readonly("mesh_edges", &DynamicSceneGraph::getMeshEdges);
 
 #undef MAKE_SPECIALZIED_NODE_ADD
 
   module.def("compute_ancestor_bounding_box", &computeAncestorBoundingBox);
+
+  py::implicitly_convertible<char, LayerPrefix>();
 }

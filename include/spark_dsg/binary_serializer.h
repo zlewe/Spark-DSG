@@ -60,7 +60,9 @@ struct BinarySerializer {
 };
 
 struct BinaryDeserializer {
-  explicit BinaryDeserializer(const std::vector<uint8_t>* buffer);
+  BinaryDeserializer(const uint8_t* const buffer, size_t length);
+
+  explicit BinaryDeserializer(const std::vector<uint8_t>& buffer);
 
   void checkType(PackType type) const;
 
@@ -72,17 +74,31 @@ struct BinaryDeserializer {
 
   size_t readFixedArrayLength() const;
 
+  inline PackType getCurrType() const {
+    if (pos >= buffer_length) {
+      throw std::out_of_range("attempt to read past end of buffer");
+    }
+
+    return static_cast<PackType>(ref[pos]);
+  }
+
   template <typename T>
   void read(T& value) const {
     pos += ::spark_dsg::serialization::read_binary(*this, value);
   }
 
   template <typename T>
-  const T* getReadPtr() const {
-    return reinterpret_cast<const T*>(ref->data() + pos);
+  const T* getReadPtr(size_t num_elements = 1) const {
+    const size_t end_pos = sizeof(T) * num_elements + pos;
+    if (end_pos > buffer_length) {
+      throw std::out_of_range("attempt to read past end of buffer");
+    }
+
+    return reinterpret_cast<const T*>(ref + pos);
   }
 
-  const std::vector<uint8_t>* ref;
+  const uint8_t* const ref;
+  const size_t buffer_length;
   mutable size_t pos;
 };
 
