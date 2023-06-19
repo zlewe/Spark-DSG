@@ -169,6 +169,10 @@ struct ObjectNodeAttributes : public SemanticNodeAttributes {
   bool registered;
   //! rotation of object w.r.t. world (only valid when registerd)
   Eigen::Quaterniond world_R_object;
+  //! Alternatives: bounding box orientations and dimensions
+  Eigen::Quaterniond bbox_orientation;
+  Eigen::Vector3d bbox_dimension;
+  int observation_count = 0;
 
  protected:
   virtual std::ostream& fill_ostream(std::ostream& out) const;
